@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Read LCHEAPO data into an obspy stream
@@ -13,8 +13,8 @@ import numpy as np
 from obspy.core import UTCDateTime, Stream, Trace
 from obspy import read_inventory
 
-from .lcheapo_utils import (LCDataBlock, LCDiskHeader)
-from .chan_maps import chan_maps
+from lcheapo_utils import (LCDataBlock, LCDiskHeader)
+from chan_maps import chan_maps
 
 
 def read(filename, starttime=None, endtime=None, network='XX', station='SSSSS',

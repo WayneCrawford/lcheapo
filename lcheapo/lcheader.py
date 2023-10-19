@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Create/modify an LCHEAPO data file header
@@ -11,10 +11,10 @@ import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .lcheapo_utils import (LCDiskHeader, LCDirEntry)
-from .version import __version__
+from lcheapo_utils import (LCDiskHeader, LCDirEntry)
+from version import __version__
 
-from .sdpchain.process_steps import ProcessStep
+from sdpchain.process_steps import ProcessStep
 
 # ------------------------------------
 # Global Variable Declarations

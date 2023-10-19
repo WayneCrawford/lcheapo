@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Cut an LCHEAPO file into pieces
@@ -13,8 +13,8 @@ import sys
 from math import floor
 from pathlib import Path
 
-from .sdpchain import ProcessStep
-from .version import __version__
+from sdpchain import ProcessStep
+from version import __version__
 
 BLOCK_SIZE = 512
 MAX_BLOCK_READ = 2048   # max number of blocks to read at once

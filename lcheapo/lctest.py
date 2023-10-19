@@ -88,7 +88,7 @@ from obspy.signal import PPSD
 # from crawtools.spectral import SpectralDensity  # PSDs
 from tiskitpy import SpectralDensity  # PSDs
 
-from .lcread import read as lcread
+from lcread import read as lcread
 
 
 def main():
