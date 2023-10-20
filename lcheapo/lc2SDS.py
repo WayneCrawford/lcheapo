@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Read LCHEAPO data into an obspy stream
@@ -12,12 +12,12 @@ import inspect
 from pathlib import Path
 
 from obspy.core import UTCDateTime
-from .sdpchain import ProcessStep
+from sdpchain import ProcessStep
 from progress.bar import IncrementalBar
 
-from .chan_maps import chan_maps
-from .lcread import read as lcread, get_data_timelimits
-from .version import __version__
+from chan_maps import chan_maps
+from lcread import read as lcread, get_data_timelimits
+from version import __version__
 
 
 def lc2SDS():
@@ -237,5 +237,5 @@ def _leap_correct(starttime, ls_times, ls_types):
 # ---------------------------------------------------------------------------
 # Run 'main' if the script is not imported as a module
 # ---------------------------------------------------------------------------
-# if __name__ == '__main__':
-#     main()
+if __name__ == '__main__':
+     lc2SDS()

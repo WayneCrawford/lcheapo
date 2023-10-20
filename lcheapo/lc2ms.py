@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 create miniSEED file(s) from LCHEAPO file(s)
@@ -10,11 +10,11 @@ import datetime
 import inspect
 from pathlib import Path
 
-from .sdpchain import ProcessStep
+from sdpchain import ProcessStep
 
-from .chan_maps import chan_maps
-from .lcread import read as lcread
-from .version import __version__
+from chan_maps import chan_maps
+from lcread import read as lcread
+from version import __version__
 
 
 def lc2ms():

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Return basic information about LCHEAPO files
@@ -6,13 +6,13 @@ Return basic information about LCHEAPO files
 By default, returns number of channels, samp_rate and start
 and end of each file
 """
-from .sdpchain import ProcessStep
-from .lcheapo_utils import (LCDataBlock, LCDiskHeader)
+from sdpchain import ProcessStep
+from lcheapo_utils import (LCDataBlock, LCDiskHeader)
 import argparse
 import os
 from datetime import timedelta
 
-from .version import __version__
+from version import __version__
 
 
 def main():
