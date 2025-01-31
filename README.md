@@ -19,7 +19,7 @@ Type ``{command} -h`` to get a list of parameters and options
 
 #### Programs that modify files
 
-These programs integrate the (sdpchainpy)[https://github.com/WayneCrawford/sdpchainpy]
+These programs integrate the [sdpchain](https://github.com/WayneCrawford/sdpchainpy)
 module, to document the processing workflow.
 
 | Program     | description                                                                   |
