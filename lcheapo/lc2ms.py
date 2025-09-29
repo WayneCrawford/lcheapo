@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 create miniSEED file(s) from LCHEAPO file(s)
@@ -13,9 +13,9 @@ from pathlib import Path
 from sdpchainpy import ProcessStep
 
 # from .sdpchain import ProcessStep
-from .instrument_metadata import chan_maps
-from .lcread import read as lcread
-from .version import __version__
+from instrument_metadata import chan_maps
+from lcread import read as lcread
+from version import __version__
 
 
 def _verify_station_code(s):

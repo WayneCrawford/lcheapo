@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Dump record information from an LCHEAPO file
@@ -9,7 +9,7 @@ import sys
 import argparse
 import datetime as dt
 
-from .lcheapo_utils import (LCDiskHeader, LCDirEntry, LCDataBlock)
+from lcheapo_utils import (LCDiskHeader, LCDirEntry, LCDataBlock)
 
 
 # ------------------------------------

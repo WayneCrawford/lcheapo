@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # flake8: noqa: W605
 """
@@ -9,14 +9,15 @@ import re
 
 from obspy.core import UTCDateTime, Stream
 
-from .instrument_metadata import chan_maps
-from .lcread import read, get_data_timelimits
+from instrument_metadata import chan_maps
+from lcread import read, get_data_timelimits
 
 
 def main():
     """
     Command-line plotting interface
     """
+
     obs_types = [s for s in chan_maps]
     epilog = "--sfilt returns the first parenthetised subgroup, using \n"
     epilog += "  python's re.search().  Some useful codes are: \n"
@@ -133,5 +134,5 @@ def _normalize_time_arg(a):
 # ---------------------------------------------------------------------------
 # Run 'main' if the script is not imported as a module
 # ---------------------------------------------------------------------------
-# if __name__ == '__main__':
-#     main()
+if __name__ == '__main__':
+    main()

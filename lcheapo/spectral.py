@@ -10,7 +10,7 @@ import numpy as np
 import math as m
 import warnings
 
-from .Peterson_noise_model import PetersonNoiseModel
+from Peterson_noise_model import PetersonNoiseModel
 
 # Set variables
 spect_library = 'scipy'  # 'mlab' or 'scipy': mlab gives weird coherences!

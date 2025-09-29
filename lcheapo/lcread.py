@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # flake8: noqa: W605
 """
@@ -14,8 +14,8 @@ import numpy as np
 from obspy.core import UTCDateTime, Stream, Trace
 # from obspy import read_inventory
 
-from .lcheapo_utils import (LCDataBlock, LCDiskHeader)
-from .instrument_metadata import chan_maps, load_station
+from lcheapo_utils import (LCDataBlock, LCDiskHeader)
+from instrument_metadata import chan_maps, load_station
 
 
 def read(filename, starttime=None, endtime=None, network='XX', station='SSSSS',

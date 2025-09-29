@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Fix errors and signal time tears in lcheapo files:
@@ -18,9 +18,9 @@ from pathlib import Path
 from sdpchainpy import ProcessStep
 from progress.bar import IncrementalBar
 
-from .lcheapo_utils import (LCDataBlock, LCDiskHeader, LCDirEntry)
+from lcheapo_utils import (LCDataBlock, LCDiskHeader, LCDirEntry)
 # from .sdpchain import ProcessStep
-from .version import __version__
+from version import __version__
 
 # ------------------------------------
 # Global Variable Declarations
