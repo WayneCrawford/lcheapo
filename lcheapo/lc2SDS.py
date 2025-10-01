@@ -155,7 +155,7 @@ def _verify_network_code(s):
 
 def _get_args():
     parser = argparse.ArgumentParser(
-        description=inspect.cleandoc(lc2SDS.__doc__),
+        description=inspect.cleandoc(main.__doc__),
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("input_files", nargs='+',
                         help="Input filename(s).  If there are captured "
