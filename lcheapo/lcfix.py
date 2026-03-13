@@ -14,6 +14,7 @@ import textwrap
 import logging      # for logging information
 from datetime import timedelta
 from pathlib import Path
+from obspy import UTCDateTime   # Added after the timedelta above, replace timedelta?
 
 from sdpchainpy import ProcessStep
 from progress.bar import IncrementalBar
@@ -98,7 +99,7 @@ def main():
     # lcData = LCDataBlock()
 
     # GET ARGUMENTS
-    args = _get_options()
+    args = _parse_arguments()
     commandQ = queue.Queue(0)
     responseQ = queue.Queue(0)
 
@@ -189,7 +190,7 @@ def main():
     sys.exit(exit_status)
 
 
-def _get_options():
+def _parse_arguments():
     """
     Parse user passed options and parameters.
     """
@@ -242,8 +243,11 @@ def _get_options():
     parser.add_argument("-F", "--forceTimes", dest="forceTime", default=False,
                         action="store_true",
                         help="Force timetags to be consecutive (USE ONLY IF"
-                             "YOU HAVE TIME TEARS AND YOU ARE SURE THE DATA"
-                             "ARE, IN FACT, CONSECUTIVE)")
+                             "YOU HAVE TIME TEARS AND YOU ARE SURE THE DATA "
+                             "ARE CONSECUTIVE)")
+    parser.add_argument("-s", "--forceStartTime", dest="forceStartTime", default=None,
+                        help="If forcing timetags to be consecutive, force "
+                             "the first timetag to this value (yyyy-mm-ddTHH:MM:SS.FFF)")
     args = parser.parse_args()
     global process_step
     process_step = ProcessStep(
@@ -253,6 +257,12 @@ def _get_options():
         app_version=__version__,
         parameters=args)
     args.in_dir, args.out_dir, args.input_files = ProcessStep.setup_paths(args)
+    
+    if args.forceStartTime is not None:
+        if args.forceTime is not True:
+            raise ValueError("Specified a forceStartTime without activating forceTimes")
+        args.forceStartTime = UTCDateTime(args.forceStartTime)
+        logging.warning(f"First data block's starttime will be forced to {args.forceStartTime.isoformat()}")
     return args
 
 
@@ -308,6 +318,7 @@ def __stopProcess(commandQ):
 def __endBUG1A(startBlock, endBlock):
     global startBUG1A
     if startBUG1A >= 0:
+        print()  # Newline after progress bar
         logging.info("{:8d}:  End LCHEAPO BUG #3 (started at {:d})".format(
                      endBlock, startBlock))
         global printHeader
@@ -509,7 +520,10 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
     lastTime = []
     for i in range(0, lcHeader.numberOfChannels):
         lcData.readBlock(ifp1)
-        lastTime.append(lcData.getDateTime() - blockTimeDelta)
+        if args.forceStartTime is None:
+            lastTime.append(lcData.getDateTime() - blockTimeDelta)
+        else:
+            lastTime.append(args.forceStartTime.datetime - blockTimeDelta)
 
     ifp1.seek(0, 2)  # Go to the end
     # lastAddress = ifp1.tell()
@@ -527,7 +541,7 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
     if debug:
         logging.info("  DEBUGGING")
 
-    bar = IncrementalBar(f'Processing {fname}', index=firstInpBlock,
+    bar = IncrementalBar(f' {fname}', index=firstInpBlock,
                          max=lastInpBlock)
     # Loop over blocks, comparing expected and actual times.
     for i in range(firstInpBlock, lastInpBlock+1):
@@ -564,7 +578,7 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
                 # FORCE TIME TO BE WHAT WE EXPECT
                 if (consecIdentTimeErrors > 0) & (diff != oldDiff):
                     # Starting a new time offset
-                    logging.info("{:d} blocks".format(
+                    logging.debug("{:d} blocks".format(
                         consecIdentTimeErrors))
                     consecIdentTimeErrors = 0
 
@@ -866,11 +880,12 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
     return counters, messages, outfilename
 
 
-def _log_error_2(type, printHeader, currBlock, chan, expect_time, t):
+def _log_error_2(bug_type, printHeader, currBlock, chan, expect_time, t):
     # LCHEAPO BUG 2 - Isolated time tag error
+    print()  # Newline after progress bar
     logging.info(
         "{}{:8d}: LCHEAPO BUG #{}.  CH{:d}  Expected Time: {}, Got: {}".
-        format(printHeader, currBlock, type, chan, expect_time, t))
+        format(printHeader, currBlock, bug_type, chan, expect_time, t))
 
 
 def _print_blockloop_message(fname, outfilename, forceTime, i,

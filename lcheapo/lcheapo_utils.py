@@ -348,10 +348,10 @@ class LCDataBlock (LCCommon):
     def printHexDumpOfHeader(self, annotated=False):
         "Print out the data header in hexidecimal format."
         if annotated:
-            fmt = "ms:{:04x} s:{:02x} mn:{:02x} hr:{:02x} dy:{:02x} " +\
-                  "mo:{:02x} yr:{:02x} Flag:{:02x} Chan:{:02x} Samples:{:04x}"
+            fmt = "ms:0x{:04x} s:0x{:02x} mn:0x{:02x} hr:0x{:02x} dy:0x{:02x} " +\
+                  "mo:0x{:02x} yr:0x{:02x} Flag:0x{:02x} Chan:0x{:02x} Samples:0x{:04x}"
         else:
-            fmt = "{:04x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x} %02x%02x%04x"
+            fmt = "0x{:04x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x} {:02x}{:02x}{:04x}"
         print(fmt.format(self.msec, self.second, self.minute, self.hour,
                          self.day, self.month, self.year, self.blockFlag,
                          self.muxChannel, self.numberOfSamples))
@@ -389,18 +389,24 @@ class LCDataBlock (LCCommon):
                                 for x in range(0, 498, 3)]]
         return data
 
-    def printHexDumpOfData(self):
-        "Print out the data block in hexidecimal format."
-        PER_COLUMN = 2  # Put a space every this many bytes
-        PER_LINE = 32   # Put a newline every this many bytes
+    def printHexDumpOfData(self, per_column=2, per_line=32, indent=0):
+        """
+        Print out the data block in hexidecimal format.
+        
+        Args:
+            per_column (int): Put a space every this many bytes
+            per_line (int): Put a newline every this many bytes
+            indent (int): Indent each line by this much
+        """
         count = 0
+        sys.stdout.write(' ' * indent)
         for i in struct.unpack(">498B", self.data):
             sys.stdout.write("{:02x}".format(i))
             count += 1
-            if count % PER_COLUMN == 0:
+            if count % per_column == 0:
                 sys.stdout.write("  ")
-            if count % PER_LINE == 0:
-                sys.stdout.write("\n")
+            if count % per_line == 0:
+                sys.stdout.write("\n" + ' ' * indent)
         sys.stdout.write("\n")
 
     def printDecimalDumpOfData(self):

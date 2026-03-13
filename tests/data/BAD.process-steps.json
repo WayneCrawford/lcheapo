@@ -4,11 +4,11 @@
             "application": {
                 "description": "Fix common bugs in LCHEAPO data files",
                 "name": "lcfix",
-                "version": "1.0.8"
+                "version": "2.2"
             },
             "execution": {
-                "command_line": "/Users/crawford/opt/anaconda3/envs/obspy/bin/lcfix -d /Users/crawford/_Work/Programming/lcheapo/tests -i data BAD.bad.lch",
-                "date": "2021-06-16T20:48:04",
+                "command_line": "/opt/anaconda3/envs/lcheapo/bin/lcfix -d /Users/crawford/_Work/Programming/lcheapo/tests -i data BAD.bad.lch",
+                "date": "2025-10-31T13:21:54",
                 "exit_status": -1,
                 "messages": [
                     "  BAD.bad.lch=>BAD.fix.lch: Finished at block 9999",
@@ -21,6 +21,7 @@
                         "output": "."
                     },
                     "dryrun": false,
+                    "forceStartTime": null,
                     "forceTime": false,
                     "input_files": [
                         "BAD.bad.lch"
