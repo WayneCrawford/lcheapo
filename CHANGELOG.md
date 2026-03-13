@@ -27,6 +27,7 @@ patch version | description
 -  Fixed a bug in `lc2ms_py` in which big files caused a segmentation fault
 
 ### v2.3
+
 - ``lcfix`` Allow a ``forcedStartTime`` if ``forceTimes`` is set
 - ``lcdump`` added a "dump data" option
 - ``lcheader`` correct process-steps output when parameters are entered
