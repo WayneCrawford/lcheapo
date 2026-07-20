@@ -1,7 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Read LCHEAPO data into an obspy stream
+Convert fixed LCHEAPO data to SeisComp Data Structure
+
+SIMPLE drift and leapsecond correction:
+    - offset is constant within each daily file
+    - offset information is not written in header
+    - data quality field is not modified
+    - leapsecond flag is not raised (causes apparent 1-s gap/overlap).
+Doesn't combine one day's SDS files made from two different LCHEAPO files
+  (last one overwrites first)
+Writes to a directory named SDS/ in the output directory.
 """
 import argparse
 import warnings
@@ -24,18 +33,6 @@ from .version import __version__
 
 
 def main():
-    """
-    Convert fixed LCHEAPO data to SeisComp Data Structure
-
-    SIMPLE drift and leapsecond correction:
-        - offset is constant within each daily file
-        - offset information is not written in header
-        - data quality field is not modified
-        - leapsecond flag is not raised (causes apparent 1-s gap/overlap).
-    Doesn't combine one day's SDS files made from two different LCHEAPO files
-      (last one overwrites first)
-    Writes to a directory named SDS/ in the output directory.
-    """
     args, process_step = _get_args()
 
     # ADJUST INPUT PARAMETERS
@@ -155,7 +152,7 @@ def _verify_network_code(s):
 
 def _get_args():
     parser = argparse.ArgumentParser(
-        description=inspect.cleandoc(main.__doc__),
+        description=inspect.cleandoc(__doc__),
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("input_files", nargs='+',
                         help="Input filename(s).  If there are captured "
@@ -175,10 +172,14 @@ def _get_args():
                         metavar=("REF_START", "INST_START"),
                         help="Start datetimes for the reference (usually GPS) "
                              "and instrument.  If only one value is provided, "
-                             "it will be used for both")
+                             "it will be used for both. "
+                             "NOTE: OPPOSITE order of that used in obsinfo "
+                             "and msmod!")
     parser.add_argument("-e", "--sync_end_times", nargs=2,
                         metavar=("REF_END", "INST_END"),
-                        help="End datetimes for the reference and instrument")
+                        help="End datetimes for the reference and instrument.  "
+                             "NOTE: OPPOSITE order of that used in obsinfo "
+                             "and msmod!")
     parser.add_argument("--leapsecond_times", nargs='+',
                         help="leapsecond times")
     parser.add_argument("--leapsecond_types", default='+',
@@ -297,12 +298,14 @@ def _adjust_leapseconds(ls_times, ls_types):
 def _leap_correct(starttime, ls_times, ls_types):
     """
     Return leap-second correction for a given time
-    :param starttime: time at start of current data segment
-    :type starttime: UTCDateTime
-    :param ls_times: list of leap second times.
-    :param ls_types: str of leap second types ('+' or '-').  If len(ls_times)
-        is not 0, ls_types and ls_times must have same length
-    :returns: seconds to add to current OBS-recorded time
+    
+    Args:
+        starttime (:class:`UTCDateTime`): time at start of current data segment
+        ls_times (list): list of leap second times.
+        ls_types (str): str of leap second types ('+' or '-').  If len(ls_times)
+            is not 0, ls_types and ls_times must have same length
+    Returns:
+        int: seconds to add to current OBS-recorded time
     """
     if ls_times is None:
         return 0

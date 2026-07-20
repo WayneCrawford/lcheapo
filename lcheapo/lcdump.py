@@ -43,6 +43,8 @@ def getOptions():
                         action="store_true",  help="Print disk header")
     parser.add_argument("-d", "--printDirectory", default=False,
                         action="store_true",  help="Print disk directory")
+    parser.add_argument("-x", "--dumpData", default=False,
+                        action="store_true",  help="dump data (hex format) as well as header")
     parser.add_argument("-f", "--format", type=int, default=0,
                         choices=[0, 1, 2, 3],
                         help="Output format: 0=pretty [default], 1=decimal,\
@@ -136,11 +138,13 @@ def main():
         elif args.format == 1:
             lcData.printDecimalDumpOfHeader(True)
         elif args.format == 2:
-            lcData.printHexDumpOfData()
+            lcData.printHexDumpOfHeader(True)
         elif args.format == 0:
             lcData.prettyPrintHeader()
         else:
             print("ERROR! Shouldn't get here!")
+        if args.dumpData is True:
+            lcData.printHexDumpOfData(indent=10)
 
 
 # Run 'main' if the script is not imported as a module

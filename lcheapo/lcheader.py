@@ -95,6 +95,9 @@ def main():
     process_step.parameters['wake_time'] = params['wake_time'].isoformat()
     process_step.parameters['end_time'] = params['end_time'].isoformat()
     process_step.output_file = params['output_filename']
+    process_step.parameters['sample_rate'] = h.sampleRate
+    process_step.parameters['num_channels'] = h.numberOfChannels
+    process_step.parameters['description'] = h.description
     process_step.exit_status = 0
     process_step.write(opts.in_dir, opts.out_dir)
     sys.exit(0)
@@ -188,10 +191,6 @@ def _modify_parameters(h, params, opts):
     datalen_blocks = int(datalen_seconds * h.sampleRate / samples_per_block) *\
         h.numberOfChannels
     h.writeBlock = h.dataStart + datalen_blocks
-
-    params['sample_rate'] = h.realSampleRate
-    params['number_of_channels'] = h.numberOfChannels
-    params['description'] = h.description
 
     return h, params
 

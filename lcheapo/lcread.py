@@ -51,9 +51,11 @@ def read(filename, starttime=None, endtime=None, network='XX', station='SSSSS',
     """
     # Check/complete input variables
     if len(network) > 2:
-        network = network[:2]
+        # network = network[:2]
+        raise ValueError(" network code '{network}' is more than 2 characters")
     if len(station) > 5:
-        network = network[:5]
+        # network = network[:5]
+        raise ValueError(" station code '{station}' is more than 5 characters")
     if not obs_type:
         warnings.warn('No obs_type provided, assuming SPOBS2')
         obs_type = 'SPOBS2'
@@ -197,10 +199,12 @@ def _read_data(starttime, endtime, fp, verbose=False):
     sample_rate = lcHeader.realSampleRate
     n_chans = lcHeader.numberOfChannels
     n_start_block = _get_block_number(starttime, fp)
-    n_end_block = _get_block_number(endtime, fp) + n_chans - 1
+    n_end_block = _get_block_number(endtime, fp)
     stream = Stream()
 
-    chan_blocks = int(((n_end_block - n_start_block + 1) / n_chans))
+    if not (n_end_block - n_start_block) % n_chans == 0:
+        raise ValueError(f"{n_end_block - n_start_block=} is not integer divisible by {n_chans=}")
+    chan_blocks = 1 + int((n_end_block - n_start_block) / n_chans)
     read_blocks = chan_blocks * n_chans
     block.seekBlock(fp, n_start_block)
 
@@ -215,7 +219,7 @@ def _read_data(starttime, endtime, fp, verbose=False):
             lb = len(buf)
             assert lb%512 == 0
         read_blocks = int(lb/512)
-    dt = np.dtype('b')  # signed byte (why?)
+    dt = np.dtype('b')  # signed byte
     all = np.frombuffer(buf, dtype=dt)
     a = np.reshape(all, (read_blocks, 512))  # keep data contiguous
     # The following takes the same amount of time ...
@@ -353,8 +357,14 @@ def _get_block_number(time, fp):
     block_len_s = block.numberOfSamples / lcHeader.realSampleRate
     num_chans = lcHeader.numberOfChannels
     record_offset = int((UTCDateTime(time)-starttime) / block_len_s)
+    
+    n_block = data_start_block + int(record_offset * num_chans)
+    
+    if not (n_block - data_start_block) % num_chans == 0:
+        raise ValueError(f'{(n_block - data_start_block)=} not integer '
+                         f'divisible by {num_chans=}. {n_block=}, {data_start_block=}')
 
-    return data_start_block + record_offset * num_chans
+    return n_block
 
 
 def _stuff_info(stream, network, station, obs_type):
@@ -383,25 +393,28 @@ def _stuff_info(stream, network, station, obs_type):
         if len(loc) > 1:
             trace.stats.location = loc
         trace.stats.response = _load_response(obs_type, sps, trace.stats.channel,
-                                              trace.stats.starttime)
+                                              trace.stats.starttime,
+                                              trace.stats.endtime)
     return stream
 
 
-def _load_response(obs_type, sample_rate, channel, start_time):
+def _load_response(obs_type, sample_rate, channel, starttime, endtime):
     """
     Load response corresponding to OBS type and component
 
     Args:
         obs_type (str): obs type (must be in channel_maps)
         channel (str): trace channel code
-        start_time (:class:`~obspy.UTCDateTime`): time for which to get response
+        starttime (:class:`~obspy.UTCDateTime`): Inventory.select parameter
+        endtime (:class:`~obspy.UTCDateTime`): Inventory.select parameter
 
     Returns:
         resp (:class:`~obspy.core.response.Response`): instrument response
     """
-    station = load_station(obs_type, sample_rate, channel=channel, starttime=start_time)
+    station = load_station(obs_type, sample_rate, channel=channel,
+                           starttime=starttime, endtime=endtime)
     try:
-        resp = station.select(channel=channel, time=start_time)[0].response
+        resp = station.select(channel=channel, time=starttime)[0].response
     except Exception:
         print(f'No response matching "{channel}" at {start_time}')
         print('Options were: ')
