@@ -5,6 +5,10 @@ Fix errors and signal time tears in lcheapo files:
   1: Isolated one second time tag offsets.
   2: Isolated bad time tags
   3: Bad n_blocks in directory entry (says 16384 but is 14336)
+
+Optimized version requirements for LCDataBlock:
+  - get_time_ms(): return integer milliseconds since 1970-01-01T00:00:00 UTC
+  - change_time_ms(value): write that integer timestamp into the block header
 """
 import sys
 import argparse
@@ -12,10 +16,13 @@ import queue
 import os
 import textwrap
 import logging      # for logging information
+import shutil
+import tempfile
 from datetime import timedelta
 from pathlib import Path
-from obspy import UTCDateTime   # Added after the timedelta above, replace timedelta?
+from time import perf_counter
 
+from obspy import UTCDateTime   # Added after the timedelta above, replace timedelta?
 from sdpchainpy import ProcessStep
 from progress.bar import IncrementalBar
 
@@ -27,6 +34,14 @@ from .version import __version__
 # Global Variable Declarations
 # ------------------------------------
 warnings = 0  # count # of warnings
+
+# LCHEAPO records are fixed-size. Large buffered reads/writes reduce the
+# number of calls into the operating system, while the progress interval
+# avoids doing terminal bookkeeping for every 512-byte record.
+BLOCK_SIZE = 512
+FILE_BUFFER_SIZE = 1 * 1024 * 1024
+PROGRESS_INTERVAL = 50_000
+TIME_EPOCH = UTCDateTime(0)  # 1970-01-01T00:00:00 UTC
 
 
 class BugCounters():
@@ -90,104 +105,226 @@ class BugCounters():
 
 
 def main():
+    """Command-line entry point, including optional local-output staging."""
+    processing_start = perf_counter()
+    args = _parse_arguments()
+    final_out_dir = Path(args.out_dir).resolve()
+
+    # A dry run creates only small report files, so local staging offers no
+    # meaningful performance benefit.
+    if args.local is None or args.dryrun:
+        if args.local is not None and args.dryrun:
+            print("NOTE: --local is ignored during --dryrun")
+        exit_status, _, _, _ = _run_lcfix(args, final_out_dir)
+        sys.exit(exit_status)
+
+    local_parent = None
+    if args.local:
+        local_parent = Path(args.local).expanduser().resolve()
+        local_parent.mkdir(parents=True, exist_ok=True)
+
+    work_dir = Path(tempfile.mkdtemp(prefix="lcfix-", dir=local_parent))
+    print(f"Using local working directory: {work_dir}")
+
+    try:
+        _check_local_space(args, work_dir)
+        args.out_dir = str(work_dir)
+
+        exit_status, out_files, messages, output_names = _run_lcfix(
+            args,
+            final_out_dir,
+            write_process_step=False,
+        )
+        processing_elapsed = perf_counter() - processing_start
+        print(f"Local processing completed in "
+              f"{processing_elapsed:.1f} seconds"
+              )
+        # Close the file logger before copying its file.
+        logging.shutdown()
+
+        copy_start = perf_counter()
+        copied_files = _copy_results_back(work_dir, final_out_dir)
+        for copied_file in copied_files:
+            print(f"Copied result to {copied_file}")
+        copy_elapsed = perf_counter() - copy_start
+        print(f"Copy-back completed in {copy_elapsed:.1f} seconds")
+
+        # Restore the user-facing output directory before recording the
+        # ProcessStep metadata, so it does not contain the temporary path.
+        args.out_dir = str(final_out_dir)
+
+        global process_step
+        process_step.messages = messages
+        process_step.exit_status = exit_status
+        process_step.output_files = output_names
+        process_step.write(args.in_dir, str(final_out_dir))
+
+    except Exception:
+        print(f"Local working files retained in {work_dir}", file=sys.stderr)
+        raise
+    else:
+        if args.keep_local:
+            print(f"Local working files retained in {work_dir}")
+        else:
+            shutil.rmtree(work_dir)
+
+    sys.exit(exit_status)
+
+
+def _run_lcfix(args, process_step_out_dir, write_process_step=True):
+    """Run lcfix using the input and output directories stored in ``args``."""
     global warnings
-    # Prepare variables
+    warnings = 0
+
     counters = BugCounters()
     n_files = 0
     msgs = []
     outFiles = []
-    # lcData = LCDataBlock()
 
-    # GET ARGUMENTS
-    args = _parse_arguments()
     commandQ = queue.Queue(0)
     responseQ = queue.Queue(0)
 
+    Path(args.out_dir).mkdir(parents=True, exist_ok=True)
     out_filename_root = args.input_files[0].split('.')[0]
     _make_logger(os.path.join(args.out_dir, out_filename_root + '.fix.txt'))
+
     if args.dryrun:
         logging.info("DRY RUN: will not output a new file")
         if args.forceTime:
             logging.info("-F (forceTimes) IGNORED during dry run")
             args.forceTime = False
 
-    # IF THERE IS A FILE WITH '.header.', PUT IT AT THE BEGINNING OF THE LIST
-    for f in args.input_files:
-        if '.header.' in f:
-            args.input_files.remove(f)
-            args.input_files.insert(0, f)
+    # If a separate header file is present, process it first.
+    for fname in list(args.input_files):
+        if '.header.' in fname:
+            args.input_files.remove(fname)
+            args.input_files.insert(0, fname)
             break
 
-    # LOOP THROUGH INPUT FILES
     numInFiles = len(args.input_files)
     firstFile = True
+
     for fname in args.input_files:
+        input_path = os.path.join(args.in_dir, fname)
+        ifp1 = open(input_path, 'rb', buffering=FILE_BUFFER_SIZE)
 
-        ifp1 = open(os.path.join(args.in_dir, fname), 'rb')
+        try:
+            if firstFile:
+                lcHeader, firstInpBlock = __readLCHeader(ifp1)
+                if args.verbosity:
+                    lcHeader.printHeader()
+                if '.header.' in fname:
+                    firstFile = False
+                    continue
+            else:
+                firstInpBlock = 0
+                lcHeader.dirCount = 0
 
-        # Find and copy the disk header
-        if firstFile:    # First file, extract header
-            lcHeader, firstInpBlock = __readLCHeader(ifp1)
-            if args.verbosity:
-                lcHeader.printHeader()
-            # DO NOT TRY TO READ DATA IF FILE IS JUST A HEADER
-            if '.header.' in fname:
+            logging.info(
+                '=' * 14 + f" PROCESSING FILE {fname} " + '=' * 13
+            )
+
+            ifp1.seek(0, 2)
+            lastInpBlock = ifp1.tell() // BLOCK_SIZE - 1
+
+            if lastInpBlock <= firstInpBlock + 4:
+                print("No data, skipping file")
                 firstFile = False
                 continue
-        else:
-            firstInpBlock = 0      # dataBlocks will start at the beginning
-            lcHeader.dirCount = 0  # No header, so no directory entries
 
-        logging.info('='*14 + " PROCESSING FILE {} ".format(fname) + "="*13)
+            if __stopProcess(commandQ):
+                return 2, outFiles, msgs, [Path(x).name for x in outFiles]
 
-        # Determine last file block
-        ifp1.seek(0, 2)                # Seek end of file
-        lastInpBlock = int(ifp1.tell() / 512) - 1
+            firstInpBlock = __findFirstMux0Block(firstInpBlock, ifp1)
 
-        if lastInpBlock <= firstInpBlock + 4:
-            print("No data, skipping file")
-            firstFile = False
-            continue
+            outFileRoot = __makeOutFileRoot(
+                args.out_dir, fname, numInFiles, ifp1, firstInpBlock
+            )
 
-        if __stopProcess(commandQ):
-            return
+            loopcounters, new_msgs, ofname = _process_input_file(
+                ifp1, fname, outFileRoot, lcHeader, firstInpBlock,
+                lastInpBlock, firstFile, args, commandQ, responseQ
+            )
+        finally:
+            ifp1.close()
 
-        # Adjust first block to correspond to first block with channel 0
-        firstInpBlock = __findFirstMux0Block(firstInpBlock, ifp1)
-
-        outFileRoot = __makeOutFileRoot(args.out_dir, fname, numInFiles,
-                                        ifp1, firstInpBlock)
-
-        # Process file
-        (loopcounters, new_msgs, ofname) = _process_input_file(
-            ifp1, fname, outFileRoot, lcHeader, firstInpBlock,
-            lastInpBlock, firstFile, args, commandQ, responseQ)
-        ifp1.close()
-
-        # Update counters
         counters += loopcounters
         n_files += 1
         msgs.extend(new_msgs)
         outFiles.append(ofname)
-
         firstFile = False
-        # END OF INPUT FILES LOOP
+
     _print_final_message(args.forceTime, counters, n_files)
 
     exit_status = 0
     if not args.dryrun:
         if counters.time_tear:
             exit_status = -1
-        elif not warnings == 0:
+        elif warnings != 0:
             exit_status = 2
 
-        global process_step
-        process_step.messages = msgs
-        process_step.exit_status = exit_status
-        process_step.output_files = [Path(x).name for x in outFiles]
-        process_step.write(args.in_dir, args.out_dir)
+        output_names = [Path(x).name for x in outFiles]
+        if write_process_step:
+            global process_step
+            process_step.messages = msgs
+            process_step.exit_status = exit_status
+            process_step.output_files = output_names
+            process_step.write(args.in_dir, str(process_step_out_dir))
+    else:
+        output_names = []
 
-    sys.exit(exit_status)
+    return exit_status, outFiles, msgs, output_names
+
+
+def _check_local_space(args, work_dir):
+    """Check that local storage can hold the expected output files."""
+    required = 0
+    for fname in args.input_files:
+        if '.header.' not in fname:
+            required += (Path(args.in_dir) / fname).stat().st_size
+
+    # Output data is approximately the input size. Add 10 percent and 256 MiB
+    # for reports, filesystem overhead, and safety margin.
+    required = int(required * 1.10) + 256 * 1024 * 1024
+    available = shutil.disk_usage(work_dir).free
+
+    if available < required:
+        raise OSError(
+            "Insufficient local disk space: need approximately "
+            f"{required / 1024**3:.1f} GiB, but only "
+            f"{available / 1024**3:.1f} GiB is available in {work_dir}"
+        )
+
+
+def _copy_results_back(work_dir, final_out_dir):
+    """Copy completed local files back without exposing partial results."""
+    final_out_dir.mkdir(parents=True, exist_ok=True)
+    copied = []
+
+    for source in sorted(work_dir.iterdir()):
+        if not source.is_file():
+            continue
+
+        destination = final_out_dir / source.name
+        temporary_destination = destination.with_name(
+            destination.name + ".lcfix-copying"
+        )
+
+        if destination.exists():
+            raise FileExistsError(
+                f"Final output file already exists: {destination}"
+            )
+
+        try:
+            shutil.copy2(source, temporary_destination)
+            os.replace(temporary_destination, destination)
+        except Exception:
+            temporary_destination.unlink(missing_ok=True)
+            raise
+
+        copied.append(destination)
+
+    return copied
 
 
 def _parse_arguments():
@@ -235,6 +372,23 @@ def _parse_arguments():
     parser.add_argument("-o", dest="out_dir", metavar="OUT_DIR", default='.',
                         help="output file directory (absolute, " +
                              "or relative to base_dir)")
+    parser.add_argument(
+        "--local",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="DIRECTORY",
+        help=(
+            "Write outputs on a local disk, then copy completed files back "
+            "to OUT_DIR. If DIRECTORY is omitted, use the operating system's "
+            "default temporary directory."
+        ),
+    )
+    parser.add_argument(
+        "--keep-local",
+        action="store_true",
+        help="Keep the local working directory after successful processing.",
+    )
     parser.add_argument("-c", "--lccut", dest="lccut_file", default=False,
                         action="store_true",
                         help="generate an lccut script file if there are time"
@@ -249,6 +403,8 @@ def _parse_arguments():
                         help="If forcing timetags to be consecutive, force "
                              "the first timetag to this value (yyyy-mm-ddTHH:MM:SS.FFF)")
     args = parser.parse_args()
+    if args.keep_local and args.local is None:
+        parser.error("--keep-local requires --local")
     global process_step
     process_step = ProcessStep(
         'lcfix',
@@ -412,23 +568,23 @@ def _make_logger(fname):
 
 
 def verify_non_time_header_values(lcData, n_bad_hdr, printHeader,
-                                  currBlock):
+                                  curr_block):
     if ((lcData.blockFlag != 73) | (lcData.numberOfSamples != 166) |
             (lcData.U1 != 3) | (lcData.U2 != 166)):
         if (n_bad_hdr < 100):
             logging.info("{}{:8d}: Unexpected non-time header values:".format(
-                printHeader, currBlock))
+                printHeader, curr_block))
             lcData.prettyPrintHeader(True)
         elif (n_bad_hdr == 100):
             logging.info("{}{:8d}: >100 Unexpected non-time headers:".format(
-                printHeader, currBlock))
+                printHeader, curr_block))
             logging.info("    WON'T PRINT ANY MORE!")
         n_bad_hdr += 1
     return n_bad_hdr
 
 
 def verify_channel_number(mux_channel, num_channels, prev_mux_chan,
-                          warnings, printHeaer, currBlock):
+                          warnings, printHeaer, curr_block):
     if prev_mux_chan != -1:
         predictedChannel = prev_mux_chan + 1
         if predictedChannel >= num_channels:
@@ -437,12 +593,12 @@ def verify_channel_number(mux_channel, num_channels, prev_mux_chan,
             if ((mux_channel >= num_channels) | (mux_channel < 0)):
                 txt = "{}{:8d}: WARNING: Channel = {:d} IS IMPOSSIBLE, " +\
                     "setting to predicted {:d}"
-                logging.warning(txt.format(printHeader, currBlock,
+                logging.warning(txt.format(printHeader, curr_block,
                                            mux_channel, predictedChannel))
                 mux_channel = predictedChannel
             else:
                 txt = "{}{:8d}: WARNING: Channel = {:d}, predicted was {:d}"
-                logging.warning(txt.format(printHeader, currBlock,
+                logging.warning(txt.format(printHeader, curr_block,
                                            mux_channel, predictedChannel))
             warnings += 1
     return mux_channel, warnings
@@ -486,17 +642,17 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
     consecIdentTimeErrors, oldDiff = 0, 0
     lcData = LCDataBlock()
 
+    outfilename = outFileRoot + ".fix.lch"
     if not args.dryrun:
-        outfilename = outFileRoot + ".fix.lch"
         if os.path.exists(outfilename):
             print(f"output file {outfilename} exists already! Quitting")
             sys.exit(2)
-        ofp1 = open(outfilename, 'wb')
+        ofp1 = open(outfilename, 'wb', buffering=FILE_BUFFER_SIZE)
     fname_timetears = outFileRoot + '.fix.timetears.txt'
     oftt = open(fname_timetears, 'w')
     of_lccut = None
     if args.lccut_file is True:
-        of_lccut = open('run_lccut.sh', 'w')
+        of_lccut = open(os.path.join(args.out_dir, 'run_lccut.sh'), 'w')
 
     # -----------------------------
     # Copy the disk header to the output file
@@ -507,23 +663,25 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
     if __stopProcess(commandQ):
         return
 
-    blockTime = int((166 * (1.0 / lcHeader.realSampleRate)) * 1000)
-    blockTimeDelta = t = timedelta(0, 0, 0, blockTime, 0, 0)
+    block_time_ms = int((166 * (1.0 / lcHeader.realSampleRate)) * 1000)
 
     # -----------------------------
     # Grab the first time entries (one for each channel) and adjust them
-    # so that they point an entire blockTimeDelta in the past.  This is done to
-    # "prime the pump" so that we can add in the blockTimeDelta the first time
-    # we use it.
+    # so that they point one block duration into the past. This primes the
+    # expected-time calculation for the first block of each channel.
     # -----------------------------
     lcData.seekBlock(ifp1, firstInpBlock)
-    lastTime = []
-    for i in range(0, lcHeader.numberOfChannels):
+    last_time_ms = []
+    force_start_ms = None
+    if args.forceStartTime is not None:
+        force_start_ms = round(args.forceStartTime.timestamp * 1000)
+
+    for _ in range(lcHeader.numberOfChannels):
         lcData.readBlock(ifp1)
-        if args.forceStartTime is None:
-            lastTime.append(lcData.getDateTime() - blockTimeDelta)
+        if force_start_ms is None:
+            last_time_ms.append(lcData.get_time_ms() - block_time_ms)
         else:
-            lastTime.append(args.forceStartTime.datetime - blockTimeDelta)
+            last_time_ms.append(force_start_ms - block_time_ms)
 
     ifp1.seek(0, 2)  # Go to the end
     # lastAddress = ifp1.tell()
@@ -541,37 +699,52 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
     if debug:
         logging.info("  DEBUGGING")
 
-    bar = IncrementalBar(f' {fname}', index=firstInpBlock,
-                         max=lastInpBlock)
+    bar = IncrementalBar(
+        f' {fname}',
+        index=firstInpBlock,
+        max=lastInpBlock,
+    )
+    progress_pending = 0
+    lookahead_data = LCDataBlock()
+
     # Loop over blocks, comparing expected and actual times.
-    for i in range(firstInpBlock, lastInpBlock+1):
-        bar.next()
+    for i in range(firstInpBlock, lastInpBlock + 1):
+        progress_pending += 1
+        if progress_pending >= PROGRESS_INTERVAL:
+            bar.next(progress_pending)
+            progress_pending = 0
         if debug and (i > lastInpBlock-10):
             logging.info("  BLOCK {:d}".format(i))
         lcData.readBlock(ifp1)
         if debug and (i > lastInpBlock - 10):
             logging.info("  READ")
-        currBlock = int(ifp1.tell() / 512) - 1
-        if startBUG1A >= 0 and currBlock > (lastBUG1s[0] + 500):
-            __endBUG1A(startBUG1A, currBlock)
-        if i != currBlock:
-            raise ValueError(
-                f"Current Block ({currBlock:d}) != expected ({i:d})")
+        # The sequential loop index is the block number. Calling tell() for
+        # every record is unnecessary overhead; retain the check in debug mode.
+        curr_block = i
+        if debug:
+            actual_block = ifp1.tell() // BLOCK_SIZE - 1
+            if actual_block != curr_block:
+                raise ValueError(
+                    f"Current Block ({actual_block:d}) != expected "
+                    f"({curr_block:d})"
+                )
+        if startBUG1A >= 0 and curr_block > (lastBUG1s[0] + 500):
+            __endBUG1A(startBUG1A, curr_block)
         if verbosity > 1:  # Very verbose, print each block header
             logging.info("{:8d}({:d}): ".format(i, ifp1.tell()))
             lcData.prettyPrintHeader()
         # VERIFY NON-TIME HEADER VALUES ############
         counters.bad_hdr = verify_non_time_header_values(
-            lcData, counters.bad_hdr, printHeader, currBlock)
+            lcData, counters.bad_hdr, printHeader, curr_block)
         # VERIFY CHANNEL NUMBER ############
         lcData.muxChannel, warnings = verify_channel_number(
             lcData.muxChannel, lcHeader.numberOfChannels,
-            prev_mux_chan, warnings, printHeader, currBlock)
+            prev_mux_chan, warnings, printHeader, curr_block)
         # Handle bad chan numbers without crashing
         # iCh = lcData.muxChannel % lcHeader.numberOfChannels
-        expect_time = lastTime[lcData.muxChannel] + blockTimeDelta
-        t = lcData.getDateTime()
-        diff = abs(_to_msec(t - expect_time))
+        expect_time_ms = last_time_ms[lcData.muxChannel] + block_time_ms
+        time_ms = lcData.get_time_ms()
+        diff = abs(time_ms - expect_time_ms)
         if diff:
             if args.forceTime or (i > lastInpBlock
                                   - (3*lcHeader.numberOfChannels)):
@@ -586,13 +759,13 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
                     # New time error or error offset
                     txt = "{}{:8d}:  CH{:d}: {:g}s offset" +\
                           " FORCED to conform..."
-                    forceTimeErrorStr = txt.format(printHeader, currBlock,
+                    forceTimeErrorStr = txt.format(printHeader, curr_block,
                                                    lcData.muxChannel,
                                                    diff/1000.)
                     if not args.forceTime:
                         forceTimeErrorStr += " BECAUSE NEAR END OF FILE"
-                t = expect_time
-                lcData.changeTime(t)
+                time_ms = expect_time_ms
+                lcData.change_time_ms(time_ms)
                 if args.forceTime:
                     counters.time_tear += 1
                 consecIdentTimeErrors += 1  # Only used for forceTime
@@ -604,92 +777,83 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
                     # See if following blocks have the expected time
                     pos = ifp1.tell()
                     channel = lcData.muxChannel
-                    nextTime = _get_next_time(ifp1, channel, pos)
-                    tempDiff = abs(_to_msec(nextTime - expect_time))
-                    if (tempDiff - 2*_to_msec(blockTimeDelta) < 2):
-                        _log_error_2("2", printHeader, currBlock,
-                                     lcData.muxChannel, expect_time,
-                                     t)
+                    next_times_ms = _get_next_times_ms(
+                        ifp1, channel, pos, lookahead_data, count=3
+                    )
+                    bug_type = None
+                    for candidate_ms, multiplier, candidate_type in zip(
+                            next_times_ms, (2, 3, 4), ("2", "2b", "2c")):
+                        temp_diff = abs(candidate_ms - expect_time_ms)
+                        # Preserve the tolerance test used by the original.
+                        if temp_diff - multiplier * block_time_ms < 2:
+                            bug_type = candidate_type
+                            break
+
+                    if bug_type is not None:
+                        _log_error_2_ms(
+                            bug_type, printHeader, curr_block,
+                            lcData.muxChannel, expect_time_ms, time_ms
+                        )
                         counters.bug2 += 1
-                        t = expect_time
-                        lcData.changeTime(t)
+                        time_ms = expect_time_ms
+                        lcData.change_time_ms(time_ms)
                     else:
-                        # Check TWO blocks ahead with the same channel
-                        nextTime = _get_next_time(ifp1, channel, pos)
-                        tempDiff = abs(_to_msec(nextTime -
-                                                expect_time))
-                        if (tempDiff - 3*_to_msec(blockTimeDelta) < 2):
-                            _log_error_2("2b", printHeader, currBlock,
-                                         lcData.muxChannel,
-                                         expect_time, t)
-                            counters.bug2 += 1
-                            t = expect_time
-                            lcData.changeTime(t)
-                        else:
-                            # Check THREE blocks ahead, same channel
-                            nextTime = _get_next_time(ifp1, channel,
-                                                      pos)
-                            tempDiff = abs(_to_msec(nextTime -
-                                                    expect_time))
-                            if (tempDiff - 4*_to_msec(blockTimeDelta)
-                                    < 2):
-                                # LCHEAPO BUG 2C
-                                _log_error_2("2c",
-                                             printHeader,
-                                             currBlock,
-                                             lcData.muxChannel,
-                                             expect_time,
-                                             t)
-                                counters.bug2 += 1
-                                t = expect_time
-                                lcData.changeTime(t)
-                            else:
-                                # Time tear (do not fix it!)
-                                fmt = "{:8d}: Time Tear in Data.   " +\
-                                      "CH{:d} Expected Time: {}, " +\
-                                      "Got: {}"
-                                txt = fmt.format(currBlock,
-                                                 lcData.muxChannel,
-                                                 expect_time, t)
-                                print()  # Newline after progress bar
-                                logging.warning(printHeader + txt)
-                                warnings += 1
-                                print(printHeader + txt, file=oftt)
-                                if of_lccut is not None:
-                                    if lccut_prev_time is None:
-                                        of_lccut.write('DIR="cut"\n')
-                                    if not t == lccut_prev_time:
-                                        of_lccut.write(f'lccut --start {lccut_prev_block } --end {currBlock-1} -o $DIR {fname}\n')
-                                        lccut_prev_time = t
-                                        lccut_prev_block = currBlock
-                                counters.time_tear += 1
-                    # Go back to original position
-                    ifp1.seek(pos)
+                        # Time tear (do not fix it!)
+                        expected_time = _ms_to_datetime(expect_time_ms)
+                        actual_time = _ms_to_datetime(time_ms)
+                        fmt = (
+                            "{:8d}: Time Tear in Data.   CH{:d} "
+                            "Expected Time: {}, Got: {}"
+                        )
+                        txt = fmt.format(
+                            curr_block, lcData.muxChannel,
+                            expected_time, actual_time
+                        )
+                        print()  # Newline after progress bar
+                        logging.warning(printHeader + txt)
+                        warnings += 1
+                        print(printHeader + txt, file=oftt)
+                        if of_lccut is not None:
+                            if lccut_prev_time is None:
+                                of_lccut.write('DIR="cut"\n')
+                            if time_ms != lccut_prev_time:
+                                of_lccut.write(
+                                    f'lccut --start {lccut_prev_block} '
+                                    f'--end {curr_block - 1} -o $DIR {fname}\n'
+                                )
+                                lccut_prev_time = time_ms
+                                lccut_prev_block = curr_block
+                        counters.time_tear += 1
+                    # _get_next_times_ms() restored the original position.
                     # End if diff > 1100:
                 else:
                     # LCHEAPO BUG - A second is dropped (then recovered)
-                    if lastBUG1s[0] == currBlock - 500:
+                    if lastBUG1s[0] == curr_block - 500:
                         if startBUG1A < 0:
                             txt = "{}{:8d}: LCHEAPO BUG #1a. BUG #1s " +\
                                   "repeating at 500-block intervals"
                             print()  # Newline after progress bar
                             logging.info(txt.format(printHeader,
-                                                    currBlock))
-                            startBUG1A = currBlock
+                                                    curr_block))
+                            startBUG1A = curr_block
                             printHeader = '      '
                     else:
                         txt = "{}{:8d}: LCHEAPO BUG #1. CH{:d} " +\
                               "Expected Time: {}, Got: {} "
                         print()  # Newline after progress bar
                         logging.info(
-                            txt.format(printHeader, currBlock,
-                                       lcData.muxChannel, expect_time, t))
+                            txt.format(
+                                printHeader, curr_block, lcData.muxChannel,
+                                _ms_to_datetime(expect_time_ms),
+                                _ms_to_datetime(time_ms),
+                            )
+                        )
                     counters.bug1 += 1
-                    t = expect_time
-                    lcData.changeTime(t)
+                    time_ms = expect_time_ms
+                    lcData.change_time_ms(time_ms)
                     # FIFO: remove 1st elem & add new last
                     lastBUG1s.pop(0)
-                    lastBUG1s.append(currBlock)
+                    lastBUG1s.append(curr_block)
         else:
             if args.forceTime and (consecIdentTimeErrors > 0):
                 print()  # Newline after progress bar
@@ -708,13 +872,15 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
 
         # Handle bad muxChannel numbers without crashing
         # iCh = lcData.muxChannel % lcHeader.numberOfChannels
-        lastTime[lcData.muxChannel] = t
+        last_time_ms[lcData.muxChannel] = time_ms
         prev_mux_chan = lcData.muxChannel
         # prev_block_flag = lcData.blockFlag
         # prev_num_samps = lcData.numberOfSamples
         # prev_U1 = lcData.U1
         # prev_U2 = lcData.U2
     # END LOOP THROUGH EVERY BLOCK
+    if progress_pending:
+        bar.next(progress_pending)
     bar.finish()
     if responseQ:
         responseQ.put((i, lastInpBlock, counters.bug1, counters.time_tear))
@@ -726,10 +892,11 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
 
     # Open the output datafile for reading
     if not args.dryrun:
-        ofp_data = open(outfilename, 'rb')  # generally the output file
+        ofp1.flush()    # explicitly flush the output files buffer
+        ofp_data = open(outfilename, 'rb', buffering=FILE_BUFFER_SIZE)  # generally the output file
     else:
         # if no output file, read block data from input file
-        ofp_data = open(fname, 'rb')
+        ofp_data = open(ifp1.name, 'rb', buffering=FILE_BUFFER_SIZE)
     lcData2 = LCDataBlock()
 
     # Point input and output file ptrs to the directory
@@ -880,12 +1047,22 @@ def _process_input_file(ifp1, fname, outFileRoot, lcHeader,
     return counters, messages, outfilename
 
 
-def _log_error_2(bug_type, printHeader, currBlock, chan, expect_time, t):
+def _ms_to_datetime(time_ms):
+    """Convert integer milliseconds since the Unix epoch to UTC datetime."""
+    return (TIME_EPOCH + time_ms / 1000.0).datetime
+
+
+def _log_error_2_ms(bug_type, printHeader, curr_block, chan,
+                    expect_time_ms, time_ms):
     # LCHEAPO BUG 2 - Isolated time tag error
     print()  # Newline after progress bar
     logging.info(
         "{}{:8d}: LCHEAPO BUG #{}.  CH{:d}  Expected Time: {}, Got: {}".
-        format(printHeader, currBlock, bug_type, chan, expect_time, t))
+        format(
+            printHeader, curr_block, bug_type, chan,
+            _ms_to_datetime(expect_time_ms), _ms_to_datetime(time_ms),
+        )
+    )
 
 
 def _print_blockloop_message(fname, outfilename, forceTime, i,
@@ -903,14 +1080,24 @@ def _print_blockloop_message(fname, outfilename, forceTime, i,
     return msgs
 
 
-def _get_next_time(ifp1, channel, pos):
-    # Get the time at the next occurence of same channel
-    tempData = LCDataBlock()
-    tempData.readBlock(ifp1)
-    while channel != tempData.muxChannel:
-        tempData.readBlock(ifp1)
-    tempTime = tempData.getDateTime()
-    return tempTime
+def _get_next_times_ms(ifp1, channel, pos, temp_data, count=3):
+    """Return upcoming timestamps for one channel using one read-ahead pass.
+
+    The input position is restored before returning. Reusing ``temp_data`` and
+    scanning once replaces the original three separate scans and allocations.
+    """
+    times_ms = []
+    try:
+        while len(times_ms) < count:
+            temp_data.readBlock(ifp1)
+            if channel == temp_data.muxChannel:
+                times_ms.append(temp_data.get_time_ms())
+    except (EOFError, OSError):
+        # Near EOF there may be fewer than ``count`` future occurrences.
+        pass
+    finally:
+        ifp1.seek(pos)
+    return times_ms
 
 
 # ---------------------------------------------------------------------------

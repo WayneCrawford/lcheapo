@@ -1,4 +1,32 @@
 
+### v2.4
+lcfix runs 3-6x faster.
+
+### v2.3
+
+- ``lcfix`` Allow a ``forcedStartTime`` if ``forceTimes`` is set
+- ``lcdump`` added a "dump data" option
+- ``lcheader`` correct process-steps output when parameters are entered
+  interactively
+
+patch version | description
+------------- | --------------
+2.3.1         | Specify numpy > 2 in setup.py file
+2.3.2         | fix bug with target datas when loading station info
+
+### v2.2
+
+-  Fixed a bug in `lc2ms_py` in which big files caused a segmentation fault
+
+### v2.1
+
+- lcread() should work with numpy2.0 (partially verified)
+- lc2SDS\_py and lc2ms\_py:
+    - argparse limits station names to 5 characters, network names to 2
+patch version | description
+------------- | --------------
+2.1.1         | `lc2ms_py`: fix `--version`, splitting of big files
+
 ## v2.0
 
 - Renamed `lc2ms_weak` to `lc2ms_py`
@@ -12,26 +40,6 @@ patch version | description
 ------------- | --------------
 .0.post1      | include examples on pypi, require module sdpchainpy
 .0.post2      | handle read length different from expected, removed `endDate` from instrument responses (except SPOBS1, and BBOBS1 pre-2012)
-
-### v2.1
-
-- lcread() should work with numpy2.0 (partially verified)
-- lc2SDS\_py and lc2ms\_py:
-    - argparse limits station names to 5 characters, network names to 2
-patch version | description
-------------- | --------------
-2.1.1         | `lc2ms_py`: fix `--version`, splitting of big files
-
-### v2.2
-
--  Fixed a bug in `lc2ms_py` in which big files caused a segmentation fault
-
-### v2.3
-
-- ``lcfix`` Allow a ``forcedStartTime`` if ``forceTimes`` is set
-- ``lcdump`` added a "dump data" option
-- ``lcheader`` correct process-steps output when parameters are entered
-  interactively
 
 ## v1.0
 

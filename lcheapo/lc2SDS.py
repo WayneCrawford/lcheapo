@@ -172,10 +172,14 @@ def _get_args():
                         metavar=("REF_START", "INST_START"),
                         help="Start datetimes for the reference (usually GPS) "
                              "and instrument.  If only one value is provided, "
-                             "it will be used for both")
+                             "it will be used for both. "
+                             "NOTE: OPPOSITE order of that used in obsinfo "
+                             "and msmod!")
     parser.add_argument("-e", "--sync_end_times", nargs=2,
                         metavar=("REF_END", "INST_END"),
-                        help="End datetimes for the reference and instrument")
+                        help="End datetimes for the reference and instrument.  "
+                             "NOTE: OPPOSITE order of that used in obsinfo "
+                             "and msmod!")
     parser.add_argument("--leapsecond_times", nargs='+',
                         help="leapsecond times")
     parser.add_argument("--leapsecond_types", default='+',

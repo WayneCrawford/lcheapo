@@ -4,7 +4,7 @@
 Data access for lcheapo files
 """
 import sys
-import datetime
+from datetime import date, datetime, timedelta
 import struct
 # import string
 import os
@@ -16,6 +16,10 @@ PROGRAM_NAME = "lcheapo.py"
 VERSION = "0.3.0"
 HEADER_START = 2
 BLOCK_SIZE = 512
+# Things added to allow *_ms() methods
+_TIME_EPOCH = datetime(1970, 1, 1)
+_UNIX_EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
+_MILLISECONDS_PER_DAY = 86_400_000
 
 
 class LCCommon:
@@ -41,13 +45,13 @@ class LCCommon:
         Convert year:day:month:hour:minute:second.msec value to datetime
         """
         try:
-            return datetime.datetime(self.fixYear(self.year),
-                                     self.month, self.day,
-                                     self.hour, self.minute,
-                                     self.second, self.msec*1000)
+            return datetime(self.fixYear(self.year),
+                            self.month, self.day,
+                            self.hour, self.minute,
+                            self.second, self.msec*1000)
         except ValueError:
             # return bogus date
-            return datetime.datetime(1900, 1, 1, 0, 0, 0, 0)
+            return datetime(1970, 1, 1, 0, 0, 0, 0)
 
     def changeTime(self, tm):
         """
@@ -64,6 +68,24 @@ class LCCommon:
         self.minute = tm.minute
         self.second = tm.second
         self.msec = int(tm.microsecond / 1000)
+
+    def get_time_ms(self) -> int:
+        try:
+            days = (date(self.fixYear(self.year), self.month, self.day).toordinal()
+                    - _UNIX_EPOCH_ORDINAL)
+            milliseconds_today = (self.hour * 3_600_000
+                                  + self.minute * 60_000
+                                  + self.second * 1_000
+                                  + self.msec)
+        except ValueError:
+            # return bogus date
+            return 0
+
+        return days * _MILLISECONDS_PER_DAY + milliseconds_today
+
+    def change_time_ms(self, time_ms: int) -> None:
+        dt = _TIME_EPOCH + timedelta(milliseconds=time_ms)
+        self.changeTime(dt)
 
     def getRealSampleRate(self, sampleRate):
         """

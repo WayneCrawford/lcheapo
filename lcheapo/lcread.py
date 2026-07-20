@@ -393,25 +393,28 @@ def _stuff_info(stream, network, station, obs_type):
         if len(loc) > 1:
             trace.stats.location = loc
         trace.stats.response = _load_response(obs_type, sps, trace.stats.channel,
-                                              trace.stats.starttime)
+                                              trace.stats.starttime,
+                                              trace.stats.endtime)
     return stream
 
 
-def _load_response(obs_type, sample_rate, channel, start_time):
+def _load_response(obs_type, sample_rate, channel, starttime, endtime):
     """
     Load response corresponding to OBS type and component
 
     Args:
         obs_type (str): obs type (must be in channel_maps)
         channel (str): trace channel code
-        start_time (:class:`~obspy.UTCDateTime`): time for which to get response
+        starttime (:class:`~obspy.UTCDateTime`): Inventory.select parameter
+        endtime (:class:`~obspy.UTCDateTime`): Inventory.select parameter
 
     Returns:
         resp (:class:`~obspy.core.response.Response`): instrument response
     """
-    station = load_station(obs_type, sample_rate, channel=channel, starttime=start_time)
+    station = load_station(obs_type, sample_rate, channel=channel,
+                           starttime=starttime, endtime=endtime)
     try:
-        resp = station.select(channel=channel, time=start_time)[0].response
+        resp = station.select(channel=channel, time=starttime)[0].response
     except Exception:
         print(f'No response matching "{channel}" at {start_time}')
         print('Options were: ')
