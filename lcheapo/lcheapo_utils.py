@@ -4,7 +4,7 @@
 Data access for lcheapo files
 """
 import sys
-import datetime
+from datetime import date, datetime, timedelta
 import struct
 # import string
 import os
@@ -16,6 +16,10 @@ PROGRAM_NAME = "lcheapo.py"
 VERSION = "0.3.0"
 HEADER_START = 2
 BLOCK_SIZE = 512
+# Things added to allow *_ms() methods
+_TIME_EPOCH = datetime(1970, 1, 1)
+_UNIX_EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
+_MILLISECONDS_PER_DAY = 86_400_000
 
 
 class LCCommon:
@@ -41,13 +45,13 @@ class LCCommon:
         Convert year:day:month:hour:minute:second.msec value to datetime
         """
         try:
-            return datetime.datetime(self.fixYear(self.year),
-                                     self.month, self.day,
-                                     self.hour, self.minute,
-                                     self.second, self.msec*1000)
+            return datetime(self.fixYear(self.year),
+                            self.month, self.day,
+                            self.hour, self.minute,
+                            self.second, self.msec*1000)
         except ValueError:
             # return bogus date
-            return datetime.datetime(1900, 1, 1, 0, 0, 0, 0)
+            return datetime(1970, 1, 1, 0, 0, 0, 0)
 
     def changeTime(self, tm):
         """
@@ -64,6 +68,24 @@ class LCCommon:
         self.minute = tm.minute
         self.second = tm.second
         self.msec = int(tm.microsecond / 1000)
+
+    def get_time_ms(self) -> int:
+        try:
+            days = (date(self.fixYear(self.year), self.month, self.day).toordinal()
+                    - _UNIX_EPOCH_ORDINAL)
+            milliseconds_today = (self.hour * 3_600_000
+                                  + self.minute * 60_000
+                                  + self.second * 1_000
+                                  + self.msec)
+        except ValueError:
+            # return bogus date
+            return 0
+
+        return days * _MILLISECONDS_PER_DAY + milliseconds_today
+
+    def change_time_ms(self, time_ms: int) -> None:
+        dt = _TIME_EPOCH + timedelta(milliseconds=time_ms)
+        self.changeTime(dt)
 
     def getRealSampleRate(self, sampleRate):
         """
@@ -348,10 +370,10 @@ class LCDataBlock (LCCommon):
     def printHexDumpOfHeader(self, annotated=False):
         "Print out the data header in hexidecimal format."
         if annotated:
-            fmt = "ms:{:04x} s:{:02x} mn:{:02x} hr:{:02x} dy:{:02x} " +\
-                  "mo:{:02x} yr:{:02x} Flag:{:02x} Chan:{:02x} Samples:{:04x}"
+            fmt = "ms:0x{:04x} s:0x{:02x} mn:0x{:02x} hr:0x{:02x} dy:0x{:02x} " +\
+                  "mo:0x{:02x} yr:0x{:02x} Flag:0x{:02x} Chan:0x{:02x} Samples:0x{:04x}"
         else:
-            fmt = "{:04x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x} %02x%02x%04x"
+            fmt = "0x{:04x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x} {:02x}{:02x}{:04x}"
         print(fmt.format(self.msec, self.second, self.minute, self.hour,
                          self.day, self.month, self.year, self.blockFlag,
                          self.muxChannel, self.numberOfSamples))
@@ -389,18 +411,24 @@ class LCDataBlock (LCCommon):
                                 for x in range(0, 498, 3)]]
         return data
 
-    def printHexDumpOfData(self):
-        "Print out the data block in hexidecimal format."
-        PER_COLUMN = 2  # Put a space every this many bytes
-        PER_LINE = 32   # Put a newline every this many bytes
+    def printHexDumpOfData(self, per_column=2, per_line=32, indent=0):
+        """
+        Print out the data block in hexidecimal format.
+        
+        Args:
+            per_column (int): Put a space every this many bytes
+            per_line (int): Put a newline every this many bytes
+            indent (int): Indent each line by this much
+        """
         count = 0
+        sys.stdout.write(' ' * indent)
         for i in struct.unpack(">498B", self.data):
             sys.stdout.write("{:02x}".format(i))
             count += 1
-            if count % PER_COLUMN == 0:
+            if count % per_column == 0:
                 sys.stdout.write("  ")
-            if count % PER_LINE == 0:
-                sys.stdout.write("\n")
+            if count % per_line == 0:
+                sys.stdout.write("\n" + ' ' * indent)
         sys.stdout.write("\n")
 
     def printDecimalDumpOfData(self):

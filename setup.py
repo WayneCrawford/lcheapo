@@ -24,7 +24,7 @@ setuptools.setup(
           'jsonschema>=2.6',
           'jsonref>=0.2',
           'progress>=1.5',
-          'numpy<2.0',
+          'numpy>2.0',
           'sdpchainpy>=1.0b2',
           'tiskitpy>=0.4'
       ],

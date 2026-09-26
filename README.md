@@ -17,9 +17,9 @@ Type ``{command} -h`` to get a list of parameters and options
 | lcplot      | plot an LCHEAPO file                                  |
 | lc_examples | create a directory with examples of lcplot and lctest |
 
-#### Programs that modify files
+#### Programs that create or modify files
 
-These programs integrate the (sdpchainpy)[https://github.com/WayneCrawford/sdpchainpy]
+These programs integrate the [sdpchain](https://github.com/WayneCrawford/sdpchainpy)
 module, to document the processing workflow.
 
 | Program     | description                                                                   |
