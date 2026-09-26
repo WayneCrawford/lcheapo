@@ -26,9 +26,9 @@ from obspy import UTCDateTime   # Added after the timedelta above, replace timed
 from sdpchainpy import ProcessStep
 from progress.bar import IncrementalBar
 
-from lcheapo_utils import (LCDataBlock, LCDiskHeader, LCDirEntry)
+from .lcheapo_utils import (LCDataBlock, LCDiskHeader, LCDirEntry)
 # from .sdpchain import ProcessStep
-from version import __version__
+from .version import __version__
 
 # ------------------------------------
 # Global Variable Declarations
