@@ -9,8 +9,8 @@ import re
 
 from obspy.core import UTCDateTime, Stream
 
-from instrument_metadata import chan_maps
-from lcread import read, get_data_timelimits
+from .instrument_metadata import chan_maps
+from .lcread import read, get_data_timelimits
 
 
 def main():
