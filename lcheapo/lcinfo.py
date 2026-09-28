@@ -9,12 +9,12 @@ and end of each file
 from sdpchainpy import ProcessStep
 
 # from .sdpchain import ProcessStep
-from lcheapo_utils import (LCDataBlock, LCDiskHeader)
+from .lcheapo_utils import (LCDataBlock, LCDiskHeader)
 import argparse
 import os
 from datetime import timedelta
 
-from version import __version__
+from .version import __version__
 
 
 def main():
